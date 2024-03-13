@@ -170,6 +170,14 @@ function saveTokenAccount(mint: PublicKey, accountData: MinimalMarketLayoutV3) {
 }
 
 export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStateV4) {
+  const runTimestamp = Math.floor(new Date().getTime() / 1000);
+  const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+  console.log(runTimestamp, poolOpenTime);
+  const open = new Date(poolOpenTime).toString(),
+    real = new Date(runTimestamp).toString();
+
+  console.table({ open, real });
+
   try {
     if (!shouldBuy(poolState.baseMint.toString())) {
       return;
@@ -177,20 +185,50 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
 
     if (CHECK_IF_MINT_IS_RENOUNCED) {
       const mintOption = await checkMintable(poolState.baseMint);
+      // await checkSolInLp(poolState);
 
       if (mintOption !== true) {
-        logger.warn({ ...poolState, }, 'Skipping, owner can mint tokens!');
+        logger.warn({ ...poolState }, 'Skipping, owner can mint tokens!');
         return;
+      }
+    }
+
+    // Display baseMint, quoteMint, and lpMint addresses before buy transaction
+    logger.info(`baseMint Address: ${poolState.baseMint.toString()}`);
+    // logger.info(`baseVault Address: ${poolState.baseVault.toString()}`);
+    // logger.info(`quoteVault Address: ${poolState.quoteVault.toString()}`);
+
+    // // logger.info(`quoteMint Address: ${accountData.quoteMint.toString()}`);
+    // logger.info(`lpMint Address: ${poolState.lpMint.toString()}`);
+
+    const qvault: number = await solanaConnection.getBalance(poolState.quoteVault);
+
+    const solAmount: number = qvault / Math.pow(10, 9);
+    const baseDecimal: number = poolState.baseDecimal.toNumber();
+    logger.info(`Base Decimal: ${baseDecimal}`);
+    logger.info(`Pool Sol Balance: ${solAmount}`);
+
+    // Retrieve the token balance of the baseVault
+    const tokenBalanceResponse = await solanaConnection.getTokenAccountBalance(poolState.baseVault);
+    const baseVaultTokenBalance = tokenBalanceResponse.value.uiAmount;
+    logger.info(`Base Token Balance: ${baseVaultTokenBalance}`);
+    if (solAmount < 10) return logger.warn('Sol in the pool is less than 10');
+
+    const totalSupply = (await solanaConnection.getTokenSupply(poolState.baseMint)).value.uiAmount;
+    if (totalSupply && baseVaultTokenBalance) {
+      const percentage = (baseVaultTokenBalance / totalSupply) * 100;
+      if (percentage >= 50) {
+        return logger.warn({ ...poolState }, 'Percentage of token in Lp is grater than 50%');
       }
     }
 
     await buy(id, poolState);
 
-    if (AUTO_SELL) {
-      await new Promise((resolve) => setTimeout(resolve, SELL_DELAY));
-      const poolKeys = existingTokenAccounts.get(poolState.baseMint.toString())!.poolKeys;
-      await sell(poolState, poolKeys as LiquidityPoolKeys);
-    }
+    // if (AUTO_SELL) {
+    //   await new Promise((resolve) => setTimeout(resolve, SELL_DELAY));
+    //   const poolKeys = existingTokenAccounts.get(poolState.baseMint.toString())!.poolKeys;
+    //   await sell(poolState, poolKeys as LiquidityPoolKeys);
+    // }
   } catch (e) {
     logger.error({ ...poolState, error: e }, `Failed to process pool`);
   }
@@ -202,16 +240,19 @@ export async function checkMintable(vault: PublicKey): Promise<boolean | undefin
     if (!data) {
       return;
     }
-    const deserialize = MintLayout.decode(data), mintAuthorityOption = deserialize.mintAuthorityOption;
+    const deserialize = MintLayout.decode(data),
+      mintAuthorityOption = deserialize.mintAuthorityOption;
     return mintAuthorityOption === 0;
   } catch (e) {
     logger.error({ mint: vault, error: e }, `Failed to check if mint is renounced`);
   }
 }
 
-export async function processOpenBookMarket(
-  updatedAccountInfo: KeyedAccountInfo,
-) {
+async function checkSolInLp(poolState: LiquidityStateV4) {
+  // Fetch liquidity pool state
+}
+
+export async function processOpenBookMarket(updatedAccountInfo: KeyedAccountInfo) {
   let accountData: MarketStateV3 | undefined;
   try {
     accountData = MARKET_STATE_LAYOUT_V3.decode(updatedAccountInfo.accountInfo.data);
@@ -380,7 +421,9 @@ const runListener = async () => {
     async (updatedAccountInfo) => {
       const key = updatedAccountInfo.accountId.toString();
       const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
+
       const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+
       const existing = existingLiquidityPools.has(key);
 
       if (poolOpenTime > runTimestamp && !existing) {
