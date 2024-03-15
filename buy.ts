@@ -170,8 +170,12 @@ function saveTokenAccount(mint: PublicKey, accountData: MinimalMarketLayoutV3) {
 }
 
 export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStateV4) {
-  const runTimestamp = Math.floor(new Date().getTime() / 1000);
-  const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+  const runTimestamp = Math.floor(new Date().getTime());
+  const poolOpenTime = parseInt(poolState.poolOpenTime.toString()) * 1000;
+
+  console.log(
+    '--------------------------------------------------------------------------------------------------------------------------------------',
+  );
   console.log(runTimestamp, poolOpenTime);
   const open = new Date(poolOpenTime).toString(),
     real = new Date(runTimestamp).toString();
@@ -212,17 +216,23 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
     const tokenBalanceResponse = await solanaConnection.getTokenAccountBalance(poolState.baseVault);
     const baseVaultTokenBalance = tokenBalanceResponse.value.uiAmount;
     logger.info(`Base Token Balance: ${baseVaultTokenBalance}`);
-    if (solAmount < 10) return logger.warn('Sol in the pool is less than 10');
-
     const totalSupply = (await solanaConnection.getTokenSupply(poolState.baseMint)).value.uiAmount;
     if (totalSupply && baseVaultTokenBalance) {
       const percentage = (baseVaultTokenBalance / totalSupply) * 100;
-      if (percentage >= 50) {
-        return logger.warn({ ...poolState }, 'Percentage of token in Lp is grater than 50%');
-      }
+  
+      if (percentage > 70) {
+        return logger.warn(
+          `There is ${percentage}% in the pool which is greater than 70%. And there is ${100 - percentage}% somewhere`,
+        );
+      } else logger.info(`There is maybe ${percentage}% in the pool and ${100 - percentage}% somewhere`);
     }
 
+    if (solAmount < 10) return logger.warn('Sol in the pool is less than 10');
+
+    // fetch dex info
+
     await buy(id, poolState);
+    
 
     // if (AUTO_SELL) {
     //   await new Promise((resolve) => setTimeout(resolve, SELL_DELAY));
@@ -415,14 +425,15 @@ function shouldBuy(key: string): boolean {
 
 const runListener = async () => {
   await init();
-  const runTimestamp = Math.floor(new Date().getTime() / 1000);
+
+  const runTimestamp = Math.floor(new Date().getTime());
   const raydiumSubscriptionId = solanaConnection.onProgramAccountChange(
     RAYDIUM_LIQUIDITY_PROGRAM_ID_V4,
     async (updatedAccountInfo) => {
       const key = updatedAccountInfo.accountId.toString();
       const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
 
-      const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+      const poolOpenTime = parseInt(poolState.poolOpenTime.toString()) * 1000;
 
       const existing = existingLiquidityPools.has(key);
 
