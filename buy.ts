@@ -219,20 +219,19 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
     const totalSupply = (await solanaConnection.getTokenSupply(poolState.baseMint)).value.uiAmount;
     if (totalSupply && baseVaultTokenBalance) {
       const percentage = (baseVaultTokenBalance / totalSupply) * 100;
-  
-      if (percentage > 70) {
+
+      if (percentage > 50) {
         return logger.warn(
-          `There is ${percentage}% in the pool which is greater than 70%. And there is ${100 - percentage}% somewhere`,
+          `There is ${percentage}% in the pool which is greater than 50%. And there is ${100 - percentage}% somewhere`,
         );
       } else logger.info(`There is maybe ${percentage}% in the pool and ${100 - percentage}% somewhere`);
     }
 
-    if (solAmount < 10) return logger.warn('Sol in the pool is less than 10');
+    if (solAmount < 20) return logger.warn('Sol in the pool is less than 20');
 
     // fetch dex info
 
     await buy(id, poolState);
-    
 
     // if (AUTO_SELL) {
     //   await new Promise((resolve) => setTimeout(resolve, SELL_DELAY));
